@@ -4,7 +4,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Kraunama…</title>
+
+  <!-- Meta antraštės dėl kešo (papildoma; svarbiausia – JS logika žemiau) -->
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
+  <meta http-equiv="Pragma" content="no-cache">
   <meta name="robots" content="noindex" />
+
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
            display:flex;min-height:100dvh;align-items:center;justify-content:center;padding:24px; }
@@ -18,35 +23,59 @@
     <h1>Kraunama…</h1>
     <p>Jei neperadresuoja automatiškai, spausk žemiau esantį mygtuką.</p>
     <p id="fallback"></p>
-    <p class="small">Patikimumui peradresavimas vyksta per <code>redirect.json</code> šiame repo.</p>
+    <p class="small">Peradresavimo tikslas skaitomas iš <code>redirect.json</code> kiekvieną kartą iš naujo.</p>
   </div>
 
   <script>
+    // Jei puslapis grąžintas iš naršyklės Back/Forward Cache – perkrauname
+    window.addEventListener('pageshow', function (e) {
+      if (e.persisted) location.reload();
+      const nav = performance.getEntriesByType && performance.getEntriesByType('navigation')[0];
+      if (nav && nav.type === 'back_forward') location.reload();
+    });
+
     (async () => {
       try {
-        // 1) perskaitome tikslą iš redirect.json
-        const res = await fetch('redirect.json', { cache: 'no-store' });
-        const data = await res.json();
-        const target = (data && data.url || '').trim();
+        // ——— NUSTATYMAI ———
+        const STRICT_CACHE_BUST = false; // jei true – prie tikslo pridės ?t=timestamp
+        // ————————————————
 
-        // 2) minimalus saugumo filtras: leidžiam tik http(s) nuorodas
+        // skaitome redirect.json be kešo + su unikaliu query, kad apeiti CDN kešą
+        const bust = Date.now();
+        const res = await fetch('redirect.json?ts=' + bust, { cache: 'no-store' });
+        const data = await res.json();
+        let target = (data && data.url || '').trim();
+
         if (!/^https?:\/\//i.test(target)) throw new Error('Neleistina nuoroda');
 
-        // 3) parodome atsarginę nuorodą ir peradresuojame
+        // griežtas režimas: pridedam laiko žymą, kad ir tikslinis URL būtų šviežias
+        if (STRICT_CACHE_BUST) {
+          const sep = target.includes('?') ? '&' : '?';
+          target = target + sep + 't=' + bust;
+        }
+
+        // parodome atsarginę nuorodą
         const a = document.createElement('a');
         a.href = target;
         a.textContent = target;
         a.rel = 'noopener';
-        a.className = 'button';
         document.getElementById('fallback').appendChild(a);
 
-        // Suteikiam akimirksnį atsarginei nuorodai atvaizduoti
-        setTimeout(() => { window.location.replace(target); }, 150);
+        // ir peradresuojame
+        setTimeout(() => { window.location.replace(target); }, 100);
       } catch (e) {
         document.querySelector('h1').textContent = 'Nepavyko peradresuoti';
         document.getElementById('fallback').innerHTML =
           'Patikrink <code>redirect.json</code> failą arba ryšį.';
         console.error(e);
+      }
+
+      // jei būtų įrašytas koks Service Worker – išregistruojam (saugumo sumetimais)
+      if ('serviceWorker' in navigator) {
+        try {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          for (const r of regs) r.unregister();
+        } catch {}
       }
     })();
   </script>
